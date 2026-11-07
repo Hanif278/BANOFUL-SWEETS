@@ -1715,9 +1715,16 @@
           if (updatedCurrent) currentUser = updatedCurrent;
         }
       }
-      if (data.settings && data.settings.shopName) {
+      if (data.settings && data.settings.shopName && !window.__brandingSaving) {
         settings.shopName = data.settings.shopName;
-        localStorage.setItem('gas_sweet_settings', JSON.stringify(settings));
+        if (data.settings.saved) {
+          // Branding saved in Google Sheet is the master copy (name, logo, tagline, phone, address)
+          if (data.settings.shopLogo) settings.shopLogo = data.settings.shopLogo;
+          if (data.settings.shopTagline !== undefined) settings.shopTagline = data.settings.shopTagline;
+          if (data.settings.phone !== undefined) settings.phone = data.settings.phone;
+          if (data.settings.address !== undefined) settings.address = data.settings.address;
+        }
+        try { localStorage.setItem('gas_sweet_settings', JSON.stringify(settings)); } catch (e) {}
         updateBrandingUI();
       }
       updateDashboardUI();
@@ -1820,7 +1827,23 @@
     }
 
     function updateBrandingUI() {
-      document.title = settings.shopName + ' — লাইভ সফটওয়্যার';
+      document.title = settings.shopName;
+      // Browser tab icon = shop logo
+      (function () {
+        let logo = settings.shopLogo || '🍯';
+        let href;
+        if (logo.startsWith('http') || logo.startsWith('data:')) href = logo;
+        else href = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">' + logo + '</text></svg>');
+        let link = document.getElementById('app-favicon');
+        if (!link) {
+          link = document.createElement('link');
+          link.id = 'app-favicon';
+          link.rel = 'icon';
+          document.head.appendChild(link);
+        }
+        link.removeAttribute('type');
+        link.href = href;
+      })();
       if (document.getElementById('side-shop-name')) document.getElementById('side-shop-name').textContent = settings.shopName;
       if (document.getElementById('side-shop-tagline')) document.getElementById('side-shop-tagline').textContent = settings.shopTagline || '';
       if (document.getElementById('hdr-shop-name')) document.getElementById('hdr-shop-name').textContent = settings.shopName;
@@ -2748,8 +2771,27 @@
       if (file) {
         let reader = new FileReader();
         reader.onload = function(evt) {
-          settings.shopLogo = evt.target.result;
-          document.getElementById('brand-logo-preview').innerHTML = '<img src="' + evt.target.result + '" class="w-full h-full object-contain">';
+          // Shrink the logo (max 256px) so it can be saved safely in the Google Sheet
+          let img = new Image();
+          img.onload = function() {
+            let max = 256, w = img.width, hgt = img.height;
+            if (w > max || hgt > max) {
+              let r = Math.min(max / w, max / hgt);
+              w = Math.round(w * r); hgt = Math.round(hgt * r);
+            }
+            let cv = document.createElement('canvas');
+            cv.width = w; cv.height = hgt;
+            cv.getContext('2d').drawImage(img, 0, 0, w, hgt);
+            let out = cv.toDataURL('image/png');
+            if (out.length > 120000) out = cv.toDataURL('image/jpeg', 0.85);
+            settings.shopLogo = out;
+            document.getElementById('brand-logo-preview').innerHTML = '<img src="' + out + '" class="w-full h-full object-contain">';
+          };
+          img.onerror = function() {
+            settings.shopLogo = evt.target.result;
+            document.getElementById('brand-logo-preview').innerHTML = '<img src="' + evt.target.result + '" class="w-full h-full object-contain">';
+          };
+          img.src = evt.target.result;
         };
         reader.readAsDataURL(file);
       }
@@ -2774,7 +2816,11 @@
       closeModal('branding-modal');
       alert('✓ কোম্পানির নাম ও লোগো সফলভাবে সংরক্ষিত হয়েছে!');
       if (typeof google !== 'undefined' && google.script && google.script.run) {
-        google.script.run.saveShopSettings(settings);
+        window.__brandingSaving = true;
+        google.script.run
+          .withSuccessHandler(function() { window.__brandingSaving = false; })
+          .withFailureHandler(function() { window.__brandingSaving = false; alert('⚠️ গুগল শিটে সেভ হয়নি, ইন্টারনেট দেখে আবার সেভ করুন।'); })
+          .saveShopSettings(settings);
       }
     }
 

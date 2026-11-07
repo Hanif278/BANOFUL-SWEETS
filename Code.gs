@@ -403,6 +403,25 @@ function saveShopSettings(st) {
   if (st && st.shopName) {
     sheet.getRange(2, 2).setValue(st.shopName);
   }
+  // Full branding (name, LOGO, tagline, phone, address) is kept permanently in the 'App_Settings' sheet.
+  // Long text (logo image) is split across cells because one cell holds max 50,000 characters.
+  if (st) {
+    var keep = {
+      shopName: st.shopName || '',
+      shopLogo: st.shopLogo || '',
+      shopTagline: st.shopTagline || '',
+      phone: st.phone || '',
+      address: st.address || ''
+    };
+    var json = JSON.stringify(keep);
+    var cfg = getOrCreateSheet(ss, 'App_Settings');
+    cfg.getRange(1, 1).setValue('Shop settings (auto-saved by software - do not edit)');
+    var last = cfg.getLastRow();
+    if (last > 1) cfg.getRange(2, 1, last - 1, 1).clearContent();
+    var CH = 40000, rows = [];
+    for (var i = 0; i < json.length; i += CH) rows.push([json.substring(i, i + CH)]);
+    cfg.getRange(2, 1, rows.length, 1).setNumberFormat('@').setValues(rows);
+  }
 }
 
 function saveSaleInvoice(inv, userName) {
@@ -636,7 +655,7 @@ function getShopSettings(ss) {
     var val = sheet.getRange(2, 2).getValue();
     if (val && String(val).trim() !== '') sName = String(val).trim();
   }
-  return {
+  var result = {
     shopName: sName,
     shopLogo: '🍯',
     shopTagline: 'খাঁটি ছানার সুস্বাদু মিষ্টি ও দুগ্ধজাত পণ্যের বিশ্বস্ত প্রতিষ্ঠান',
@@ -644,6 +663,22 @@ function getShopSettings(ss) {
     address: 'দোকান নং ১২, মিষ্টি গলি, চকবাজার, ঢাকা',
     currency: '৳'
   };
+  // Load saved branding (incl. logo) from 'App_Settings'
+  try {
+    var cfg = ss.getSheetByName('App_Settings');
+    if (cfg && cfg.getLastRow() >= 2) {
+      var parts = cfg.getRange(2, 1, cfg.getLastRow() - 1, 1).getValues();
+      var json = parts.map(function(r) { return String(r[0]); }).join('');
+      var saved = JSON.parse(json);
+      if (saved.shopName) result.shopName = saved.shopName;
+      if (saved.shopLogo) result.shopLogo = saved.shopLogo;
+      if (saved.shopTagline !== undefined) result.shopTagline = saved.shopTagline;
+      if (saved.phone !== undefined) result.phone = saved.phone;
+      if (saved.address !== undefined) result.address = saved.address;
+      result.saved = true;
+    }
+  } catch (e) {}
+  return result;
 }
 
 function getUserRows(ss) {

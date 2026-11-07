@@ -1602,6 +1602,7 @@
   <script>
     (function () {
       if (window.google && window.google.script && window.google.script.run) return; // inside Apps Script itself
+      var GAS_URL = 'https://script.google.com/macros/s/AKfycby1R_3sqS65X3ONRNl0Ro3JpllPGwQdAWAMsm446pP2U1VQLlUl-rPSO009eEYdLFu0/exec';
       function makeRunner(onOk, onFail) {
         return new Proxy({}, {
           get: function (_, prop) {
@@ -1609,10 +1610,11 @@
             if (prop === 'withFailureHandler') return function (fn) { return makeRunner(onOk, fn); };
             return function () {
               var args = Array.prototype.slice.call(arguments);
-              fetch('/api/gas', {
+              fetch(GAS_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ method: String(prop), args: args })
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: 'RPC', method: String(prop), args: args }),
+                redirect: 'follow'
               })
                 .then(function (r) { return r.json(); })
                 .then(function (j) {

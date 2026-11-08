@@ -2527,7 +2527,7 @@
       runReportFilter();
     }
 
-    function runReportFilter() {
+    function runSalesReportFilter() {
       let fromVal = document.getElementById('rep-from-date') ? document.getElementById('rep-from-date').value : '';
       let toVal = document.getElementById('rep-to-date') ? document.getElementById('rep-to-date').value : '';
       let repType = document.getElementById('rep-type') ? document.getElementById('rep-type').value : 'sales';
@@ -2536,13 +2536,7 @@
       let toTime = toVal ? new Date(toVal + 'T23:59:59').getTime() : Infinity;
 
       filteredReportInvoices = invoices.filter(inv => {
-        let invTime = new Date(inv.date).getTime();
-        if (isNaN(invTime)) {
-          let parts = (inv.date || '').split(' ')[0].split('/');
-          if (parts.length === 3) {
-            invTime = new Date(parts[2] + '-' + parts[0] + '-' + parts[1]).getTime();
-          }
-        }
+        let invTime = parseReportTime(inv.date);
         if (isNaN(invTime)) return true;
         return invTime >= fromTime && invTime <= toTime;
       });
@@ -2572,7 +2566,7 @@
       filterReportTableData();
     }
 
-    function filterReportTableData() {
+    function filterSalesReportTable() {
       let q = (document.getElementById('rep-table-search') ? document.getElementById('rep-table-search').value : '').trim().toLowerCase();
       let list = filteredReportInvoices.filter(inv => {
         if (!q) return true;
@@ -2622,11 +2616,199 @@
       }).join('');
     }
 
+    // ===== Report popup: dropdown (report type) + date filters now work for every report =====
+    let currentReportType = 'sales';
+    let currentGenericHeaders = [];
+    let currentGenericRows = [];
+    let __salesHeaderHTML = null;
+    let __salesLabels = null;
+
+    function parseReportTime(val) {
+      let str = String(val || '').trim();
+      if (!str) return NaN;
+      let t = new Date(str).getTime();
+      if (!isNaN(t)) return t;
+      let m = str.match(/(\d{1,4})[\/\-.](\d{1,2})[\/\-.](\d{1,4})/);
+      if (m) {
+        let a = +m[1], b = +m[2], c = +m[3];
+        if (a > 31) return new Date(a, b - 1, c).getTime();
+        if (a > 12) return new Date(c, b - 1, a).getTime();
+        return new Date(c, a - 1, b).getTime();
+      }
+      return NaN;
+    }
+
+    function repEsc(s) {
+      return String(s === undefined || s === null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function handleQuickDateSelect(range) {
+      setReportQuickRange(range === 'currentMonth' ? 'thisMonth' : range);
+    }
+
+    function setRepStats(labels, values) {
+      ['rep-stat-count', 'rep-stat-sales', 'rep-stat-paid', 'rep-stat-due', 'rep-stat-profit'].forEach((id, i) => {
+        let el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = values[i];
+        let lb = el.previousElementSibling;
+        if (lb && labels[i] !== undefined) lb.textContent = labels[i];
+      });
+    }
+
+    function runReportFilter() {
+      let typeEl = document.getElementById('rep-type');
+      let repType = typeEl ? typeEl.value : 'sales';
+      let headEl = document.getElementById('rep-table-header-row');
+
+      // remember the original sales layout once
+      if (__salesHeaderHTML === null && headEl) __salesHeaderHTML = headEl.innerHTML;
+      if (__salesLabels === null) {
+        __salesLabels = ['rep-stat-count', 'rep-stat-sales', 'rep-stat-paid', 'rep-stat-due', 'rep-stat-profit'].map(id => {
+          let el = document.getElementById(id);
+          return el && el.previousElementSibling ? el.previousElementSibling.textContent : '';
+        });
+      }
+
+      // attach date-change listeners once (so changing a date refreshes the report)
+      ['rep-from-date', 'rep-to-date'].forEach(id => {
+        let el = document.getElementById(id);
+        if (el && !el.__repBound) {
+          el.addEventListener('change', runReportFilter);
+          el.__repBound = true;
+        }
+      });
+
+      let fromVal = document.getElementById('rep-from-date') ? document.getElementById('rep-from-date').value : '';
+      let toVal = document.getElementById('rep-to-date') ? document.getElementById('rep-to-date').value : '';
+      let rangeText = (fromVal || toVal) ? ((fromVal || '...') + ' থেকে ' + (toVal || '...')) : 'সকল তারিখ';
+      let badgeRange = document.getElementById('rep-date-range-badge');
+      let pill = document.getElementById('rep-badge-pill');
+
+      currentReportType = repType;
+
+      if (repType === 'sales') {
+        if (headEl && __salesHeaderHTML !== null) headEl.innerHTML = __salesHeaderHTML;
+        runSalesReportFilter();
+        // runSalesReportFilter writes the numbers; restore sales labels
+        ['rep-stat-count', 'rep-stat-sales', 'rep-stat-paid', 'rep-stat-due', 'rep-stat-profit'].forEach((id, i) => {
+          let el = document.getElementById(id);
+          if (el && el.previousElementSibling && __salesLabels[i]) el.previousElementSibling.textContent = __salesLabels[i];
+        });
+        if (badgeRange) badgeRange.textContent = rangeText;
+        if (pill) pill.textContent = 'বিক্রয় ও ইনভয়েস হিসাব রিপোর্ট (' + rangeText + ')';
+        return;
+      }
+
+      let fromTime = fromVal ? new Date(fromVal + 'T00:00:00').getTime() : 0;
+      let toTime = toVal ? new Date(toVal + 'T23:59:59').getTime() : Infinity;
+      let fmt = n => '৳ ' + (Number(n) || 0).toLocaleString();
+
+      if (repType === 'stock') {
+        let list = products;
+        let totalQty = list.reduce((a, p) => a + (Number(p.stock) || 0), 0);
+        let costVal = list.reduce((a, p) => a + (Number(p.stock) || 0) * (Number(p.cost) || 0), 0);
+        let saleVal = list.reduce((a, p) => a + (Number(p.stock) || 0) * (Number(p.price) || 0), 0);
+        let low = list.filter(p => (Number(p.stock) || 0) <= 5).length;
+        setRepStats(['মোট পণ্য', 'মোট স্টক পরিমাণ', 'স্টকের ক্রয়মূল্য', 'স্টকের বিক্রয়মূল্য', 'কম স্টক (৫ বা কম)'],
+          [list.length + ' টি', totalQty.toLocaleString(), fmt(costVal), fmt(saleVal), low + ' টি']);
+        currentGenericHeaders = [
+          { t: 'আইডি' }, { t: 'পণ্যের নাম' }, { t: 'ক্যাটাগরি' }, { t: 'ইউনিট' },
+          { t: 'স্টক', num: true }, { t: 'ক্রয় দর', num: true }, { t: 'বিক্রয় দর', num: true },
+          { t: 'স্টক মূল্য', num: true }, { t: 'অবস্থা' }
+        ];
+        currentGenericRows = list.map(p => {
+          let st = Number(p.stock) || 0;
+          return [p.id, p.name, p.category, p.unit, st, Number(p.cost) || 0, Number(p.price) || 0,
+            st * (Number(p.cost) || 0), st <= 0 ? 'স্টক শেষ' : (st <= 5 ? 'কম স্টক' : 'পর্যাপ্ত')];
+        });
+        if (badgeRange) badgeRange.textContent = 'বর্তমান স্টক অবস্থা';
+        if (pill) pill.textContent = 'প্রোডাক্ট স্টক রিপোর্ট (বর্তমান অবস্থা)';
+      } else if (repType === 'dues') {
+        let list = customers.filter(c => (Number(c.totalDue) || 0) > 0);
+        let totalDue = list.reduce((a, c) => a + (Number(c.totalDue) || 0), 0);
+        let totalBought = customers.reduce((a, c) => a + (Number(c.totalPurchased) || 0), 0);
+        let maxDue = list.reduce((a, c) => Math.max(a, Number(c.totalDue) || 0), 0);
+        setRepStats(['মোট কাস্টমার', 'বাকি আছে এমন কাস্টমার', 'মোট বাকি (৳)', 'মোট ক্রয় (৳)', 'সর্বোচ্চ বাকি (৳)'],
+          [customers.length + ' জন', list.length + ' জন', fmt(totalDue), fmt(totalBought), fmt(maxDue)]);
+        currentGenericHeaders = [
+          { t: 'আইডি' }, { t: 'কাস্টমার নাম' }, { t: 'মোবাইল' }, { t: 'ঠিকানা' },
+          { t: 'মোট ক্রয়', num: true }, { t: 'বাকি (Due)', num: true }, { t: 'সর্বশেষ পেমেন্ট' }
+        ];
+        currentGenericRows = list.map(c => [c.id, c.name, c.phone, c.address, Number(c.totalPurchased) || 0, Number(c.totalDue) || 0, c.lastPaymentDate || '']);
+        if (badgeRange) badgeRange.textContent = 'বর্তমান বাকির অবস্থা';
+        if (pill) pill.textContent = 'কাস্টমার বাকি রিপোর্ট (বর্তমান অবস্থা)';
+      } else if (repType === 'expense') {
+        let list = expenses.filter(e => {
+          let t = parseReportTime(e.date);
+          if (isNaN(t)) return true;
+          return t >= fromTime && t <= toTime;
+        });
+        let total = list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+        let maxExp = list.reduce((a, e) => Math.max(a, Number(e.amount) || 0), 0);
+        let cats = {};
+        list.forEach(e => { cats[e.category || 'অন্যান্য'] = true; });
+        setRepStats(['মোট এন্ট্রি', 'মোট খরচ (৳)', 'সর্বোচ্চ খরচ (৳)', 'গড় খরচ (৳)', 'খরচের খাত'],
+          [list.length + ' টি', fmt(total), fmt(maxExp), fmt(list.length ? Math.round(total / list.length) : 0), Object.keys(cats).length + ' টি']);
+        currentGenericHeaders = [
+          { t: 'তারিখ' }, { t: 'আইডি' }, { t: 'খরচের খাত' }, { t: 'পরিমাণ (৳)', num: true },
+          { t: 'পদ্ধতি' }, { t: 'নোট' }, { t: 'এন্ট্রি করেছেন' }
+        ];
+        currentGenericRows = list.map(e => [(e.date || '').split(' ')[0], e.id, e.category, Number(e.amount) || 0, e.paymentMethod, e.note, e.enteredBy]);
+        if (badgeRange) badgeRange.textContent = rangeText;
+        if (pill) pill.textContent = 'খরচ রিপোর্ট (' + rangeText + ')';
+      }
+
+      if (headEl) {
+        headEl.innerHTML = currentGenericHeaders.map(c => '<th class="p-2 border-r' + (c.num ? ' text-right' : '') + '">' + c.t + '</th>').join('');
+      }
+      filterReportTableData();
+    }
+
+    function filterReportTableData() {
+      if (currentReportType === 'sales') { filterSalesReportTable(); return; }
+      let q = (document.getElementById('rep-table-search') ? document.getElementById('rep-table-search').value : '').trim().toLowerCase();
+      let rows = currentGenericRows.filter(r => !q || r.join(' ').toLowerCase().includes(q));
+      let badgeEl = document.getElementById('rep-table-badge');
+      if (badgeEl) badgeEl.textContent = rows.length + ' রেকর্ড';
+      let tbody = document.getElementById('rep-table-body');
+      if (!tbody) return;
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="' + currentGenericHeaders.length + '" class="p-8 text-center text-slate-400 font-sans">উক্ত ফিল্টারে কোনো রেকর্ড পাওয়া যায়নি</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(r => '<tr class="hover:bg-slate-50 transition border-b border-slate-100">' +
+        r.map((v, i) => {
+          let isNum = currentGenericHeaders[i] && currentGenericHeaders[i].num;
+          return '<td class="p-2 border-r whitespace-nowrap ' + (isNum ? 'text-right font-bold text-slate-900' : 'text-slate-700 font-sans') + '">' +
+            (isNum ? '৳ ' + (Number(v) || 0).toLocaleString() : repEsc(v)) + '</td>';
+        }).join('') + '</tr>').join('');
+    }
+
+    function exportReportCSV() {
+      if (currentReportType === 'sales') { exportSalesReportCSV(); return; }
+      if (currentGenericRows.length === 0) {
+        alert('ডাউনলোড করার মতো কোনো রিপোর্ট ডেটা নেই!');
+        return;
+      }
+      let esc = v => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"';
+      let csv = '\uFEFF' + [currentGenericHeaders.map(c => esc(c.t)).join(',')]
+        .concat(currentGenericRows.map(r => r.map(esc).join(','))).join('\n');
+      let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      let url = URL.createObjectURL(blob);
+      let link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'shop_' + currentReportType + '_report_' + new Date().toISOString().slice(0, 10) + '.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
     function printReportPaper() {
       window.print();
     }
 
-    function exportReportCSV() {
+    function exportSalesReportCSV() {
       if (filteredReportInvoices.length === 0) {
         alert('ডাউনলোড করার মতো কোনো রিপোর্ট ডেটা নেই!');
         return;

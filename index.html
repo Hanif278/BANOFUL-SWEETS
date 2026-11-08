@@ -62,8 +62,14 @@
         line-height: 1.3 !important;
         page-break-inside: avoid !important;
       }
-      .no-print-edge, .modal-action-bar, button {
+      .no-print-edge, .modal-action-bar, button, select {
         display: none !important;
+      }
+    }
+    @media print {
+      html, body {
+        height: auto !important;
+        overflow: visible !important;
       }
     }
   </style>
@@ -1406,6 +1412,10 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
+          <select id="receipt-paper-size" onchange="setReceiptPaperSize(this.value)" class="bg-slate-700 text-white text-xs font-bold rounded-lg px-2 py-1.5 border border-slate-500 focus:outline-hidden">
+            <option value="80">৮০মিমি পেপার</option>
+            <option value="58">৫৮মিমি পেপার</option>
+          </select>
           <button
             onclick="triggerReceiptPrint()"
             class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 active:scale-95 shadow-md"
@@ -3219,9 +3229,36 @@
       }
 
       openModal('pos-receipt-modal');
+      let savedSize = '80';
+      try { savedSize = localStorage.getItem('gas_sweet_paper_size') || '80'; } catch (e) {}
+      setReceiptPaperSize(savedSize);
+    }
+
+    function setReceiptPaperSize(size) {
+      size = (size === '58') ? '58' : '80';
+      try { localStorage.setItem('gas_sweet_paper_size', size); } catch (e) {}
+      let sel = document.getElementById('receipt-paper-size');
+      if (sel) sel.value = size;
+      let rc = document.getElementById('pos-thermal-receipt');
+      if (rc) {
+        rc.style.width = (size === '58' ? '58mm' : '78mm');
+        rc.style.minWidth = (size === '58' ? '58mm' : '78mm');
+      }
+      let st = document.getElementById('dyn-paper-style');
+      if (!st) {
+        st = document.createElement('style');
+        st.id = 'dyn-paper-style';
+        document.head.appendChild(st);
+      }
+      let w = (size === '58') ? 58 : 80;
+      st.textContent = '@media print { @page { size: ' + w + 'mm auto; margin: 0mm; } ' +
+        'html, body { width: ' + w + 'mm !important; } ' +
+        '#pos-receipt-modal { width: ' + w + 'mm !important; max-width: ' + w + 'mm !important; } ' +
+        '#pos-thermal-receipt { width: ' + (w - 4) + 'mm !important; max-width: ' + (w - 4) + 'mm !important; min-width: 0 !important; } }';
     }
 
     function triggerReceiptPrint() {
+      setReceiptPaperSize((document.getElementById('receipt-paper-size') || {}).value || '80');
       window.print();
     }
 
@@ -3488,6 +3525,26 @@
     }
 
     // DASHBOARD METRICS & TABLES
+    // Works with every date format (local sale, or date coming back from Google Sheet)
+    function isTodayDateValue(val) {
+      let str = String(val || '').trim();
+      if (!str) return false;
+      let now = new Date();
+      let sameDay = function (d) {
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      };
+      if (str.indexOf(now.toLocaleDateString()) !== -1) return true;
+      let d = new Date(str);
+      if (!isNaN(d.getTime()) && sameDay(d)) return true;
+      let m = str.match(/(\d{1,4})[\/\-.](\d{1,2})[\/\-.](\d{1,4})/);
+      if (m) {
+        let a = +m[1], b = +m[2], c = +m[3];
+        if (a > 31) return sameDay(new Date(a, b - 1, c));
+        return sameDay(new Date(c, a - 1, b)) || sameDay(new Date(c, b - 1, a));
+      }
+      return false;
+    }
+
     function updateDashboardUI() {
       let totalSales = invoices.reduce((a, b) => a + b.grandTotal, 0);
       let totalPaid = invoices.reduce((a, b) => a + b.paidAmount, 0);
@@ -3497,11 +3554,8 @@
       let totalStock = products.reduce((a, b) => a + (Number(b.stock) || 0), 0);
       let lowStockItems = products.filter(p => (Number(p.stock) || 0) <= 5);
 
-      let todayStr = new Date().toLocaleDateString();
-      let todaySales = invoices.filter(inv => {
-        let invDate = (inv.date || '').split(' ')[0];
-        return invDate === todayStr || (inv.date || '').includes(todayStr);
-      }).reduce((a, b) => a + (Number(b.grandTotal) || 0), 0);
+      let todaySales = invoices.filter(inv => isTodayDateValue(inv.date))
+        .reduce((a, b) => a + (Number(b.grandTotal) || 0), 0);
       let varietyCount = products.length;
 
       let todaySalesEl = document.getElementById('stat-today-sales');

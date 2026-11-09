@@ -555,9 +555,12 @@
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-emerald-50/60 p-3 rounded-xl border border-emerald-200">
           <div class="sm:col-span-5">
             <label class="block text-[11px] font-semibold text-emerald-900 mb-1">মিষ্টি নির্বাচন করুন</label>
+            <input type="text" id="pos-product-search" autocomplete="off" oninput="posProductSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();posPickProduct(0);}" placeholder="🔍 মিষ্টির নাম লিখে খুঁজুন..." class="w-full px-2.5 py-1.5 mb-1.5 bg-white border border-emerald-300 rounded font-medium focus:outline-hidden focus:ring-1 focus:ring-emerald-500">
+            <div id="pos-search-results" class="hidden mb-1.5 max-h-44 overflow-y-auto border border-emerald-200 rounded bg-white divide-y divide-slate-100"></div>
             <select id="pos-select-product" onchange="handlePosProductSelect()" class="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded font-medium">
               <option value="">-- মিষ্টি বাছাই করুন --</option>
             </select>
+            <div id="pos-stock-info" class="hidden mt-1.5 px-2.5 py-1.5 rounded text-[11px] font-bold"></div>
           </div>
           <div class="sm:col-span-2">
             <label class="block text-[11px] font-semibold text-emerald-900 mb-1">দর (৳)</label>
@@ -3173,6 +3176,10 @@
         sel.appendChild(opt);
       });
       renderPosCart();
+      let ps = document.getElementById('pos-product-search');
+      if (ps) ps.value = '';
+      posProductSearch();
+      updatePosStockInfo();
     }
 
     function handlePosProductSelect() {
@@ -3185,6 +3192,70 @@
         document.getElementById('pos-item-rate').value = '';
         document.getElementById('pos-item-unit').textContent = 'একক';
       }
+      updatePosStockInfo();
+    }
+
+    // ===== Sale entry: search item + show its stock =====
+    let __posMatches = [];
+
+    function posStockBadge(p) {
+      let st = Number(p.stock) || 0;
+      let cls = st <= 0 ? 'bg-rose-100 text-rose-700' : (st <= 5 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800');
+      return '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ' + cls + '">স্টক: ' + st + ' ' + repEsc(p.unit || '') + '</span>';
+    }
+
+    function posProductSearch() {
+      let input = document.getElementById('pos-product-search');
+      let box = document.getElementById('pos-search-results');
+      if (!input || !box) return;
+      let q = input.value.trim().toLowerCase();
+      if (!q) { box.classList.add('hidden'); box.innerHTML = ''; __posMatches = []; return; }
+      __posMatches = products.filter(p =>
+        String(p.name || '').toLowerCase().includes(q) ||
+        String(p.id || '').toLowerCase().includes(q) ||
+        String(p.category || '').toLowerCase().includes(q)
+      ).slice(0, 12);
+      box.classList.remove('hidden');
+      if (__posMatches.length === 0) {
+        box.innerHTML = '<div class="p-2 text-center text-slate-400">কোনো মিষ্টি পাওয়া যায়নি</div>';
+        return;
+      }
+      box.innerHTML = __posMatches.map((p, i) =>
+        '<button type="button" onclick="posPickProduct(' + i + ')" class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-emerald-50 transition">' +
+          '<span class="font-semibold text-slate-800">' + repEsc(p.name) + ' <span class="text-slate-400 font-normal">৳' + repEsc(p.price) + '</span></span>' +
+          posStockBadge(p) +
+        '</button>'
+      ).join('');
+    }
+
+    function posPickProduct(idx) {
+      let p = __posMatches[idx];
+      if (!p) return;
+      let sel = document.getElementById('pos-select-product');
+      if (sel) sel.value = p.id;
+      handlePosProductSelect();
+      let input = document.getElementById('pos-product-search');
+      if (input) input.value = p.name;
+      let box = document.getElementById('pos-search-results');
+      if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+      let qty = document.getElementById('pos-item-qty');
+      if (qty) qty.focus();
+    }
+
+    function updatePosStockInfo() {
+      let el = document.getElementById('pos-stock-info');
+      if (!el) return;
+      let sel = document.getElementById('pos-select-product');
+      let p = sel ? products.find(x => x.id === sel.value) : null;
+      if (!p) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+      let st = Number(p.stock) || 0;
+      let inCart = (typeof posCart !== 'undefined' ? posCart : []).filter(c => c.productId === p.id).reduce((a, c) => a + (Number(c.quantity) || 0), 0);
+      let left = st - inCart;
+      let cls = st <= 0 ? 'bg-rose-50 text-rose-700 border border-rose-200' : (left <= 5 ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200');
+      el.className = 'mt-1.5 px-2.5 py-1.5 rounded text-[11px] font-bold ' + cls;
+      el.innerHTML = '📦 স্টকে আছে: ' + st + ' ' + repEsc(p.unit || '') +
+        (inCart > 0 ? ' &nbsp;|&nbsp; কার্টে: ' + inCart + ' &nbsp;|&nbsp; বাকি থাকবে: ' + left : '') +
+        (st <= 0 ? ' — স্টক শেষ!' : '');
     }
 
     function addPosItemToCart() {
@@ -3212,11 +3283,15 @@
       document.getElementById('pos-select-product').value = '';
       document.getElementById('pos-item-rate').value = '';
       document.getElementById('pos-item-qty').value = 1;
+      let ps = document.getElementById('pos-product-search');
+      if (ps) { ps.value = ''; posProductSearch(); ps.focus(); }
+      updatePosStockInfo();
     }
 
     function removePosCartItem(idx) {
       posCart.splice(idx, 1);
       renderPosCart();
+      updatePosStockInfo();
     }
 
     function renderPosCart() {
